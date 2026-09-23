@@ -165,3 +165,51 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 
 - Remaining uncertainty:
   Database and Redis dependent endpoints should be tested next.
+
+
+## Entry 4 - Fix PostgreSQL credentials - 2026-09-23T20:59:16+03:00
+
+- Symptom:
+  The application was reachable through NGINX, but `/ready` returned HTTP 503
+  because PostgreSQL was unavailable.
+
+- Hypothesis:
+  The application database connection settings did not match the PostgreSQL
+  container initialization credentials.
+
+- Command or test:
+  `docker exec app-01 env | grep -E "DATABASE|REDIS"`
+  `grep -n "POSTGRES" docker-compose.yml`
+  `cat config/app.env`
+  `docker exec app-01 python -c "import psycopg; psycopg.connect(...)"`
+
+- Actual output:
+  The application used:
+  `BarqLabOnly_7qN2vK8d`
+
+  PostgreSQL was initialized with:
+  `BarqLabOnly_7qN2vK8c`
+
+  The connection failed with:
+  `password authentication failed for user "barq_app"`
+
+- Root cause:
+  DATABASE_URL contained a different password from POSTGRES_PASSWORD.
+
+- Fix:
+  Updated config/app.env to use the same PostgreSQL password as docker-compose.yml.
+
+- Retest evidence:
+  `curl -i http://127.0.0.1:8080/ready`
+  returned HTTP 200 with:
+  `"postgres":"ready","redis":"ready"`
+
+  `/records` returned HTTP 200 with database records.
+
+  `/counter` returned HTTP 200 with Redis-backed counter data.
+
+- Related commit:
+  Pending.
+
+- Remaining uncertainty:
+  None for local runtime functionality.
