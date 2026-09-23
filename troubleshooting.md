@@ -74,3 +74,57 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Remaining uncertainty:
   PostgreSQL and Redis connectivity through /ready has not yet been tested successfully
   because the public proxy path and application network reachability fail first.
+
+
+## Entry 2 - Correct NGINX public port mapping - 2026-09-23T08:48:41+03:00
+
+- Symptom:
+  Requests to http://127.0.0.1:8080 were reset before receiving an HTTP response.
+
+- Hypothesis:
+  Docker was forwarding host port 8080 to a container port where NGINX was not listening.
+
+- Command or test:
+  `docker port nginx`
+  `docker exec nginx nginx -T`
+  `curl -i --max-time 5 http://127.0.0.1:8080/`
+  `docker compose -p barq-assessment logs nginx --no-color --tail=30`
+
+- Actual output:
+  Before the fix, `docker port nginx` showed
+  `81/tcp -> 127.0.0.1:8080`.
+  The loaded NGINX configuration showed `listen 80;`.
+  After the fix, `docker port nginx` showed
+  `80/tcp -> 127.0.0.1:8080`.
+  Curl reached NGINX and returned HTTP 502 instead of a connection reset.
+  NGINX logged a refused upstream connection to app-01:8081.
+
+- Failed attempt and what changed your thinking:
+  Calling NGINX directly inside its container on port 80 returned HTTP 502.
+  This proved that NGINX itself was running and that the public port mapping
+  was a separate problem from the upstream application connectivity problem.
+
+- Root cause:
+  Docker Compose forwarded host port 8080 to NGINX container port 81,
+  while the running NGINX process listened on container port 80.
+
+- Fix:
+  Changed the NGINX Compose mapping from
+  `127.0.0.1:${PUBLIC_PORT:-8080}:81`
+  to
+  `127.0.0.1:${PUBLIC_PORT:-8080}:80`.
+
+- Retest evidence:
+  `docker port nginx` now reports
+  `80/tcp -> 127.0.0.1:8080`.
+  `curl -i --max-time 5 http://127.0.0.1:8080/`
+  now receives an HTTP 502 response from NGINX.
+  This confirms that the host-to-NGINX path is repaired and exposes the
+  next independent problem between NGINX and the Flask backends.
+
+- Related commit:
+  `fb571bf` - fix: publish nginx on its listening port
+
+- Remaining uncertainty:
+  NGINX still cannot reach the Flask backends. The application binding
+  and NGINX upstream configuration require separate investigation.
