@@ -128,3 +128,40 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Remaining uncertainty:
   NGINX still cannot reach the Flask backends. The application binding
   and NGINX upstream configuration require separate investigation.
+
+
+## Entry 3 - Fix application networking and NGINX upstream - 2026-09-23T20:00:42+03:00
+
+- Symptom:
+  NGINX returned HTTP 502 even though the application containers were healthy.
+
+- Hypothesis:
+  NGINX could not reach the Flask containers because of incorrect container networking configuration.
+
+- Command or test:
+  `docker exec nginx wget -S -O- http://app-01:8080/`
+  `docker exec nginx wget -S -O- http://app-02:8080/`
+  `docker exec nginx nginx -T | grep -A5 upstream`
+
+- Actual output:
+  Both application containers responded with HTTP 200 when accessed from NGINX.
+  The loaded NGINX configuration used app-01:8080 and app-02:8080.
+
+- Root cause:
+  Flask was previously bound to 127.0.0.1, preventing Docker network access.
+  NGINX also contained an incorrect upstream port for app-01.
+
+- Fix:
+  Changed APP_HOST from 127.0.0.1 to 0.0.0.0.
+  Changed NGINX upstream app-01 port from 8081 to 8080.
+  Recreated the NGINX container to load the new configuration.
+
+- Retest evidence:
+  `curl -i http://127.0.0.1:8080/`
+  returned HTTP 200 with the application JSON response.
+
+- Related commit:
+  Pending.
+
+- Remaining uncertainty:
+  Database and Redis dependent endpoints should be tested next.
