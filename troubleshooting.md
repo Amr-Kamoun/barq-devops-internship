@@ -1,18 +1,6 @@
 # Troubleshooting journal
 
-Keep chronological entries. Copy this block for each meaningful investigation.
-
-## Entry / date / time
-- Symptom:
-- Hypothesis:
-- Command or test:
-- Actual output:
-- Failed attempt and what changed your thinking:
-- Root cause:
-- Fix:
-- Retest evidence:
-- Related commit:
-- Remaining uncertainty:
+Keep chronological entries for each meaningful investigation.
 
 Do not fabricate a failed attempt just to fill the template. Record actual attempts.
 
@@ -144,7 +132,11 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
   `docker exec nginx nginx -T | grep -A5 upstream`
 
 - Actual output:
-  Both application containers responded with HTTP 200 when accessed from NGINX.
+  Before the fix, NGINX could not reach the applications because
+  the upstream port and Flask binding were incorrect.
+
+  After applying the changes, both application containers responded
+  with HTTP 200 when accessed from NGINX.
   The loaded NGINX configuration used app-01:8080 and app-02:8080.
 
 - Root cause:
@@ -161,7 +153,7 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
   returned HTTP 200 with the application JSON response.
 
 - Related commit:
-  Pending.
+  `0f93158` - fix: repair app networking and nginx upstream
 
 - Remaining uncertainty:
   Database and Redis dependent endpoints should be tested next.
@@ -209,7 +201,61 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
   `/counter` returned HTTP 200 with Redis-backed counter data.
 
 - Related commit:
-  Pending.
+  `a6460ce` - fix: align postgres credentials and document final recovery
 
 - Remaining uncertainty:
   None for local runtime functionality.
+
+## Entry 5 - Verify PostgreSQL persistence - 2026-09-24T10:00:00+03:00
+
+- Symptom:
+  PostgreSQL persistence had not yet been verified after changing from temporary storage to a named volume.
+
+- Hypothesis:
+  The named PostgreSQL volume should preserve application records after recreating the PostgreSQL container.
+
+- Command or test:
+
+  curl -s -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Persistence test"}' \
+  http://127.0.0.1:8080/records
+
+  curl -s http://127.0.0.1:8080/records
+
+  docker compose -p barq-assessment up -d --force-recreate postgres
+
+  curl -s http://127.0.0.1:8080/records
+
+
+- Actual output:
+  A new PostgreSQL record was created:
+  `{"id":3,"title":"Persistence test"}`
+
+  After PostgreSQL container recreation, the same record was still
+  returned by `/records`.
+
+- Failed attempt and what changed your thinking:
+  The initial configuration used `tmpfs` for PostgreSQL data, which would not
+  survive container recreation. Replacing it with a named volume allowed
+  persistence verification.
+
+- Root cause:
+  PostgreSQL storage was configured as temporary storage instead of
+  persistent storage.
+
+- Fix:
+  Replaced temporary PostgreSQL storage with:
+
+  volumes:
+    - postgres-data:/var/lib/postgresql/data
+
+- Retest evidence:
+  PostgreSQL container recreation completed successfully and the created
+  record remained available.
+
+- Related commit:
+  `ee66b5f` - fix: enforce container network isolation and persistence
+
+- Remaining uncertainty:
+  Backup and restore workflow still requires validation.
