@@ -166,6 +166,27 @@ The workflow currently uses major-version references such as `actions/checkout@v
 supply-chain policy would pin Actions to reviewed immutable commit SHAs and use an
 automated dependency updater to propose controlled upgrades.
 
+## Finding 11 - Vulnerability scanning identified known image CVEs
+
+- Risk and evidence: An optional Docker Scout scan of both locally built Flask
+  application images reported 17 High/Critical vulnerabilities across 5 packages:
+  3 Critical and 14 High. The findings were primarily in operating-system packages
+  inherited from the pinned Debian-based Python image.
+- Impact: Known vulnerable packages can increase exploitability if an affected code
+  path is reachable. Pinning an image improves reproducibility but does not mean that
+  the pinned image remains secure indefinitely.
+- Implemented fix / commit: Added `scripts/security_scan.sh` so the local application
+  image can be scanned reproducibly with Docker Scout. The default mode reports
+  findings; `SCOUT_STRICT=1` can enforce a non-zero exit when vulnerabilities are
+  detected.
+- Production follow-up: Review Scout base-image recommendations, update the pinned base
+  digest after regression testing, generate an SBOM, distinguish reachable/applicable
+  findings from inherited but unused packages, and automate regular rescanning.
+- How to verify: Build the application image and run
+  `./scripts/security_scan.sh`. Run
+  `SCOUT_STRICT=1 ./scripts/security_scan.sh` to verify that a vulnerability policy can
+  fail when High/Critical findings remain.
+
 ## Review summary
 
 Implemented controls currently include secret removal from tracked active configuration,

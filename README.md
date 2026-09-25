@@ -413,6 +413,36 @@ and tested off-host backups.
 See `decisions.md` and `security_review.md` for detailed trade-offs and production
 follow-ups.
 
+## Optional container vulnerability scan
+
+Docker Scout can be used to scan the locally built application image for known
+High/Critical vulnerabilities.
+
+Build the application image first if necessary:
+
+    docker compose build
+
+Run the report-only scan:
+
+    ./scripts/security_scan.sh
+
+Scan another application image explicitly:
+
+    ./scripts/security_scan.sh barq-assessment-app-02:latest
+
+For a policy/enforcement mode where detected vulnerabilities cause a non-zero exit:
+
+    SCOUT_STRICT=1 ./scripts/security_scan.sh
+
+The pre-video scan of both application images found 17 High/Critical vulnerabilities
+in 5 packages: 3 Critical and 14 High. Some findings had fixed package versions
+available while others were reported without an available fix.
+
+This result is intentionally documented rather than treated as a clean-security result.
+A production image-maintenance process should review Docker Scout recommendations,
+update the pinned base-image digest after testing, generate an SBOM, and regularly
+rescan rebuilt images.
+
 ## Security notes
 
 Implemented controls include:
