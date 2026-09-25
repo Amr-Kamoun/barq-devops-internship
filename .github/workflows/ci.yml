@@ -1,0 +1,108 @@
+name: BARQ CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  COMPOSE_PROJECT_NAME: barq-assessment
+
+jobs:
+  validate:
+    name: Build and Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare CI environment
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+
+      - name: Show tool versions
+        run: |
+          set -euo pipefail
+          python --version
+          docker --version
+          docker compose version
+
+      - name: Validate syntax
+        run: |
+          set -euo pipefail
+
+          python -m py_compile \
+            app/server.py \
+            validate.py \
+            failure_test.py
+
+          bash -n backup.sh
+          bash -n restore.sh
+
+          docker compose config -q
+
+      - name: Build containers
+        run: |
+          set -euo pipefail
+          docker compose build
+
+      - name: Start stack
+        run: |
+          set -euo pipefail
+          docker compose up -d
+          docker compose ps
+
+      - name: Wait for readiness
+        run: |
+          set -euo pipefail
+
+          set -a
+          source .env
+          set +a
+
+          for attempt in $(seq 1 60); do
+            if curl \
+              --fail \
+              --silent \
+              --show-error \
+              --max-time 3 \
+              "http://127.0.0.1:${PUBLIC_PORT}/ready" \
+              > /dev/null
+            then
+              echo "Application ready on attempt ${attempt}"
+              exit 0
+            fi
+
+            echo "Waiting for application readiness (${attempt}/60)"
+            sleep 2
+          done
+
+          echo "Application did not become ready before timeout"
+          docker compose ps
+          exit 1
+
+      - name: Run validation
+        run: |
+          set -euo pipefail
+          timeout 120s python validate.py
+
+      - name: Show diagnostics on failure
+        if: failure()
+        run: |
+          docker compose ps || true
+          docker compose logs --no-color --tail=200 || true
+
+      - name: Clean up
+        if: always()
+        run: |
+          docker compose down -v --remove-orphans || true
