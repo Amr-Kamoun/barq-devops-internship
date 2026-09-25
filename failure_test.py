@@ -1,107 +1,269 @@
 #!/usr/bin/env python3
 
+import json
+import os
 import subprocess
-import urllib.request
-import time
 import sys
+import time
+import urllib.request
+from pathlib import Path
 
 
-URL = "http://127.0.0.1:8080/instance"
+PROJECT = os.getenv("COMPOSE_PROJECT_NAME", "barq-assessment")
+TARGET = os.getenv("FAILURE_TARGET", "app-01")
 
 
-def request():
-    try:
-        with urllib.request.urlopen(URL, timeout=3) as r:
-            return r.read().decode()
-    except Exception:
-        return None
+def detect_public_port():
+    if os.getenv("PUBLIC_PORT"):
+        return os.environ["PUBLIC_PORT"]
+
+    env_file = Path(".env")
+    if env_file.exists():
+        for raw_line in env_file.read_text().splitlines():
+            line = raw_line.strip()
+            if line.startswith("PUBLIC_PORT="):
+                return line.split("=", 1)[1].strip()
+
+    return "8080"
 
 
-def run(cmd):
-    return subprocess.run(
-        cmd,
-        shell=True,
+BASE_URL = os.getenv(
+    "BASE_URL",
+    f"http://127.0.0.1:{detect_public_port()}",
+)
+
+
+def compose(*args, check=False):
+    result = subprocess.run(
+        ["docker", "compose", "-p", PROJECT, *args],
         capture_output=True,
-        text=True
+        text=True,
     )
+
+    if check and result.returncode != 0:
+        if result.stdout:
+            print(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+
+        raise RuntimeError(
+            f"docker compose {' '.join(args)} failed"
+        )
+
+    return result
+
+
+def get_app_services():
+    result = compose("config", "--services", check=True)
+
+    return sorted(
+        service
+        for service in result.stdout.splitlines()
+        if service.startswith("app-")
+    )
+
+
+def request_instance():
+    request = urllib.request.Request(
+        f"{BASE_URL}/instance",
+        headers={"Connection": "close"},
+    )
+
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=4,
+        ) as response:
+            data = json.loads(response.read().decode())
+
+        return True, data.get("instance_id"), None
+
+    except Exception as exc:
+        return False, None, str(exc)
+
+
+def wait_for_health(service, timeout=45):
+    deadline = time.monotonic() + timeout
+
+    while time.monotonic() < deadline:
+        container = compose(
+            "ps",
+            "-q",
+            service,
+            check=True,
+        ).stdout.strip()
+
+        if container:
+            result = subprocess.run(
+                [
+                    "docker",
+                    "inspect",
+                    "-f",
+                    "{{if .State.Health}}"
+                    "{{.State.Health.Status}}"
+                    "{{else}}"
+                    "{{.State.Status}}"
+                    "{{end}}",
+                    container,
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+            state = result.stdout.strip()
+
+            if (
+                result.returncode == 0
+                and state in {"healthy", "running"}
+            ):
+                return True
+
+        time.sleep(1)
+
+    return False
 
 
 def main():
+    backends = get_app_services()
 
-    print("Stopping app-01")
+    if TARGET not in backends:
+        print(
+            f"FAIL: target {TARGET} not found in "
+            f"backends {backends}"
+        )
+        return 1
 
-    run(
-        "docker compose -p barq-assessment stop app-01"
-    )
+    survivors = set(backends) - {TARGET}
 
-    time.sleep(5)
+    if not survivors:
+        print("FAIL: no surviving backend exists")
+        return 1
 
-    success = 0
-    failures = 0
+    print(f"Public URL: {BASE_URL}")
+    print(f"Backends: {', '.join(backends)}")
+    print(f"Failure target: {TARGET}")
+    print()
 
-    for _ in range(20):
+    availability_ok = False
+    recovery_ok = False
 
-        result = request()
+    try:
+        print(f"Stopping {TARGET}")
+        compose("stop", TARGET, check=True)
 
-        if result:
-            success += 1
-            print("PASS", result)
+        time.sleep(2)
 
+        successes = 0
+        failures = 0
+        served_by = set()
+
+        print("Testing public availability during outage...")
+
+        for number in range(1, 21):
+            ok, instance, error = request_instance()
+
+            if ok:
+                successes += 1
+                served_by.add(instance)
+
+                print(
+                    f"PASS {number:02d}: served by {instance}"
+                )
+            else:
+                failures += 1
+
+                print(
+                    f"FAIL {number:02d}: {error}"
+                )
+
+            time.sleep(0.25)
+
+        print()
+        print(
+            f"Traffic results: "
+            f"success={successes} failures={failures}"
+        )
+
+        print(
+            "Instances observed during outage: "
+            + ", ".join(sorted(served_by))
+        )
+
+        availability_ok = (
+            failures == 0
+            and TARGET not in served_by
+            and bool(served_by & survivors)
+        )
+
+        if availability_ok:
+            print(
+                "AVAILABILITY PASS: all public requests "
+                "were served by surviving backend(s)"
+            )
         else:
-            failures += 1
-            print("FAIL")
+            print(
+                "AVAILABILITY FAIL: client-visible "
+                "failure or invalid routing detected"
+            )
 
-        time.sleep(0.5)
+    finally:
+        print()
+        print(f"Restoring {TARGET}")
 
-    print(
-        f"Traffic results: success={success} failures={failures}"
-    )
+        compose("start", TARGET, check=True)
 
-    print("Restoring app-01")
+        if not wait_for_health(TARGET):
+            print(
+                f"RECOVERY FAIL: {TARGET} did not become "
+                "healthy before timeout"
+            )
+        else:
+            print(f"{TARGET} is healthy")
+            print(
+                "Proving recovered backend serves "
+                "public traffic..."
+            )
 
-    run(
-        "docker compose -p barq-assessment start app-01"
-    )
+            for number in range(1, 61):
+                ok, instance, error = request_instance()
 
-    time.sleep(15)
+                if ok:
+                    print(
+                        f"RECOVERY {number:02d}: "
+                        f"served by {instance}"
+                    )
 
-    recovery_results = []
+                    if instance == TARGET:
+                        recovery_ok = True
+                        break
+                else:
+                    print(
+                        f"RECOVERY {number:02d}: "
+                        f"request failed: {error}"
+                    )
 
-    for _ in range(20):
-        result = request()
+                time.sleep(0.25)
 
-        if result:
-            recovery_results.append(result)
+            if recovery_ok:
+                print(
+                    f"RECOVERY PASS: recovered backend "
+                    f"{TARGET} served public traffic"
+                )
+            else:
+                print(
+                    f"RECOVERY FAIL: recovered backend "
+                    f"{TARGET} was not observed"
+                )
 
-        time.sleep(0.5)
+    print()
 
-    app01_seen = any(
-        "app-01" in r
-        for r in recovery_results
-    )
-
-    app02_seen = any(
-        "app-02" in r
-        for r in recovery_results
-    )
-
-    if app01_seen and app02_seen:
-        print(
-            "RECOVERY PASS: both backends serving"
-        )
-        print(
-            recovery_results
-        )
+    if availability_ok and recovery_ok:
+        print("FAILURE TEST PASSED")
         return 0
 
-    print(
-        "RECOVERY FAILED"
-    )
-    print(
-        recovery_results
-    )
+    print("FAILURE TEST FAILED")
     return 1
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     sys.exit(main())

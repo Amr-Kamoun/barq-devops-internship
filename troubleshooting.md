@@ -323,4 +323,26 @@ and so the recovered backend must be observed serving public traffic.
 
 ### Retest
 
-Pending implementation and verification.
+NGINX was changed to use bounded upstream retry/failover:
+
+- `max_fails=1 fail_timeout=5s`
+- `proxy_connect_timeout 1s`
+- `proxy_next_upstream error timeout http_502 http_503 http_504`
+- `proxy_next_upstream_tries 2`
+- `proxy_next_upstream_timeout 3s`
+
+`failure_test.py` was also strengthened so client-visible outage failures
+cause a non-zero exit and the recovered backend must be observed serving
+traffic again.
+
+Post-fix result:
+
+- `Traffic results: success=20 failures=0`
+- `AVAILABILITY PASS`
+- recovered `app-01` became healthy and served public traffic
+- `FAILURE TEST PASSED`
+- exit code `0`
+
+NGINX logs showed requests with overall HTTP status `200` and
+`upstream_status` of `504, 200`, proving that the first upstream attempt
+failed but NGINX retried the surviving backend successfully.
