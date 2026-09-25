@@ -257,5 +257,70 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Related commit:
   `ee66b5f` - fix: enforce container network isolation and persistence
 
-- Remaining uncertainty:
-  Backup and restore workflow still requires validation.
+- Follow-up verification:
+  Backup and restore workflow was implemented and validated in commit
+  `319726e`. A pre-backup record survived restore while a record created
+  after the backup was removed by the restore.
+
+## 6. Backend outage caused client-visible failures
+
+### Symptom
+
+A controlled failure test stopped `app-01` and sent 20 requests through
+the public NGINX endpoint.
+
+Observed result:
+
+- `Traffic results: success=10 failures=10`
+- `RECOVERY PASS: both backends serving`
+- `failure_test.py` returned exit code `0`
+
+This showed two problems: public traffic experienced failures while one
+backend was unavailable, and the test still reported overall success.
+
+### Hypotheses
+
+1. NGINX continued selecting the stopped backend instead of retrying the
+   surviving backend.
+2. Passive upstream failure handling was disabled.
+3. `failure_test.py` checked recovery but did not include outage failures
+   in its final exit condition.
+
+### Investigation
+
+The NGINX configuration contained:
+
+- `server app-01:8080 max_fails=0;`
+- `server app-02:8080 max_fails=0;`
+- `proxy_connect_timeout 2s;`
+- `proxy_read_timeout 3s;`
+- `proxy_next_upstream off;`
+
+During the controlled outage, NGINX logged HTTP 502/504 responses and:
+
+`connect() failed (113: Host is unreachable) while connecting to upstream`
+
+The stopped upstream continued to be selected repeatedly.
+
+Inspection of `failure_test.py` also showed that the outage `failures`
+counter was printed but was not part of the final success condition.
+
+### Root cause
+
+NGINX failover was effectively disabled. `proxy_next_upstream off`
+prevented retrying another backend, while `max_fails=0` disabled passive
+failure counting.
+
+Separately, `failure_test.py` had incomplete pass/fail criteria because it
+could return success after recovery even when client-visible requests had
+failed during the outage.
+
+### Planned fix
+
+Enable bounded NGINX retry/failover and passive failure handling. Update
+`failure_test.py` so client-visible outage failures cause a non-zero exit
+and so the recovered backend must be observed serving public traffic.
+
+### Retest
+
+Pending implementation and verification.
