@@ -78,5 +78,6 @@ final repository and runtime behavior.
 AI-generated suggestions were treated as hypotheses or drafts, not as authoritative
 evidence. Final conclusions were based on commands executed in the assessment
 environment, source-controlled diffs, runtime behavior, original-log analysis and CI
-results. The recorded video will independently demonstrate the final system and required
-live changes.
+results. The 13:58 recorded video independently demonstrates the final system and required
+live changes, including the one-time challenge, port 8090 and the third application
+instance.

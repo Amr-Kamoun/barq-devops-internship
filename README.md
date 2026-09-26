@@ -69,7 +69,7 @@ Build the application image:
 
 Or explicitly rebuild without using the application build cache:
 
-    docker compose build --no-cache app-01 app-02
+    docker compose build --no-cache app-01 app-02 app-03
 
 ## Start
 
@@ -85,17 +85,17 @@ Follow logs if needed:
 
     docker compose logs -f
 
-A healthy pre-recording stack contains:
+A healthy final stack contains:
 
     nginx
     app-01
     app-02
+    app-03
     postgres
     redis
 
-The recorded challenge later requires adding the final third application instance and
-changing the public port. Those required live changes are intentionally not performed
-early.
+The final recorded configuration uses three Flask application instances behind NGINX
+and publishes only NGINX on loopback host port 8090.
 
 ## Stop
 
@@ -224,7 +224,7 @@ Create a unique record first:
 
 Recreate application and PostgreSQL containers without deleting volumes:
 
-    docker compose up -d --force-recreate app-01 app-02 postgres
+    docker compose up -d --force-recreate app-01 app-02 app-03 postgres
 
 Wait for health and confirm the record still exists:
 
@@ -294,11 +294,12 @@ A green CI run proves that the tested commit built and passed the automated inte
 checks in a clean GitHub-hosted runner. It does not prove long-term availability,
 production security, capacity, disaster recovery or performance under sustained load.
 
-A verified pre-recording push run completed successfully for commit `b2a92c8`:
+The recorded live final-configuration commit
+`86686ace594b2ad9c4c076c6dd7875f407869f58` is the functional commit produced
+during the continuous video.
 
-    https://github.com/Amr-Kamoun/barq-devops-internship/actions/runs/36171059838
-
-The final submission will reference the CI run matching the final post-video commit.
+The evidence index records the matching GitHub Actions run and any later
+documentation-only commit separately.
 
 ## Network and request flow
 
@@ -434,9 +435,9 @@ For a policy/enforcement mode where detected vulnerabilities cause a non-zero ex
 
     SCOUT_STRICT=1 ./scripts/security_scan.sh
 
-The pre-video scan of both application images found 17 High/Critical vulnerabilities
-in 5 packages: 3 Critical and 14 High. Some findings had fixed package versions
-available while others were reported without an available fix.
+The optional scan of the two initial application images found 17 High/Critical
+vulnerabilities in 5 packages: 3 Critical and 14 High. Some findings had fixed package
+versions available while others were reported without an available fix.
 
 This result is intentionally documented rather than treated as a clean-security result.
 A production image-maintenance process should review Docker Scout recommendations,
@@ -500,18 +501,36 @@ because they can remove unrelated Docker resources.
 
 ## Final recorded challenge
 
-The supplied `video_challenge.sh` must remain unchanged and must not be run before the
-continuous recorded demonstration.
+The required continuous demonstration was completed in a fresh working copy with a
+duration of 13:58.
 
-During the recording it will be run once for the first time in that working copy. The
-runtime fault it creates must be diagnosed and repaired without using
-`docker compose down` as a reset.
+The recording started from clean commit:
 
-The same continuous recording also requires the live public-port change and addition of
-a third application instance.
+    389cb7521ce31cb73ea7594d0ec52e830e0c7786
 
-After those live changes, this README, the architecture diagram and evidence index will
-be synchronized with the final three-instance / port-8090 repository state.
+At that point the environment used the required initial two-instance configuration on
+public port 8080.
+
+`./video_challenge.sh` was executed once for the first time in that working copy.
+
+Challenge receipt:
+
+    73de40e9ee064990bc5d4447aea6207d
+
+The challenge disconnected `app-02` from the frontend network. The fault was diagnosed
+from the live container network membership and repaired by reconnecting only that
+network. The challenge was not reset with `docker compose down`.
+
+During the same continuous recording, the public port was changed from 8080 to 8090,
+`app-03` was added, NGINX was reloaded with all three upstreams, all three application
+identities were observed through NGINX, and final validation passed.
+
+The live final-configuration changes were committed and pushed as:
+
+    86686ace594b2ad9c4c076c6dd7875f407869f58
+
+Any commits after that hash are documentation/evidence-only finalization and do not
+change the runtime architecture demonstrated in the video.
 
 ## AI-assisted work
 

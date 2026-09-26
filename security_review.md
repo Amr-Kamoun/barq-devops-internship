@@ -47,7 +47,7 @@ presented as a production-ready high-availability deployment.
   `5a7b54f` added validation that only NGINX publishes the expected loopback-bound port.
 - Production follow-up: Use a controlled ingress/load balancer with TLS and host/network
   firewall policy. Stateful services should remain private.
-- How to verify: Run `docker compose ps`, `docker inspect` on all five services, or
+- How to verify: Run `docker compose ps`, inspect all configured services with `docker inspect`, or
   `python3 validate.py`. Validation must fail if a non-NGINX service publishes a port.
 
 ## Finding 4 - Backend services require network isolation
@@ -72,16 +72,18 @@ presented as a production-ready high-availability deployment.
 - Impact: A successful exploit could gain unnecessary privileges inside the container
   and make container breakout weaknesses more damaging.
 - Implemented fix / commit: `990a8b9` creates a dedicated application UID/GID 10001 and
-  sets `USER app` in the Dockerfile. Both application containers were runtime-verified
-  as UID 10001.
+  sets `USER app` in the Dockerfile. All application services use the same hardened
+  image and are configured to run as UID 10001.
 - Production follow-up: Also use a read-only root filesystem where possible, drop Linux
   capabilities, apply `no-new-privileges`, and use seccomp/AppArmor or equivalent
   controls.
 - How to verify: Run:
   `docker compose exec -T app-01 id -u`
   and
-  `docker compose exec -T app-02 id -u`.
-  Both should return `10001`.
+  `docker compose exec -T app-02 id -u`
+  and
+  `docker compose exec -T app-03 id -u`.
+  All should return `10001`.
 
 ## Finding 6 - Base/container images require controlled selection and updates
 
@@ -126,7 +128,7 @@ presented as a production-ready high-availability deployment.
 
 ## Finding 9 - Application redundancy does not remove infrastructure single points of failure
 
-- Risk and evidence: Two application instances provide app-tier redundancy, but NGINX,
+- Risk and evidence: Three application instances provide app-tier redundancy, but NGINX,
   PostgreSQL, Redis and the single Docker host are still single points of failure.
 - Impact: Failure of any of those shared components can make the whole service
   unavailable even if an application container remains healthy.
@@ -168,8 +170,8 @@ automated dependency updater to propose controlled upgrades.
 
 ## Finding 11 - Vulnerability scanning identified known image CVEs
 
-- Risk and evidence: An optional Docker Scout scan of both locally built Flask
-  application images reported 17 High/Critical vulnerabilities across 5 packages:
+- Risk and evidence: An optional Docker Scout scan of the two initial locally built
+  Flask application images reported 17 High/Critical vulnerabilities across 5 packages:
   3 Critical and 14 High. The findings were primarily in operating-system packages
   inherited from the pinned Debian-based Python image.
 - Impact: Known vulnerable packages can increase exploitability if an affected code
